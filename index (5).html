@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Midnight Chess - Multiplayer</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  :root { --bg: #0f172a; --board-dark: #334155; --board-light: #94a3b8; --text: #f8fafc; --accent: #eab308; --accent-hover: #facc15; --nav-bg: #1e293b; --danger: #ef4444; --size: calc(min(90vw, 550px) / 8); }
+  body { margin: 0; padding-bottom: 70px; min-height: 100vh; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; user-select: none; -webkit-user-select: none; touch-action: none; overflow-x: hidden; }
+  .screen { display: none; width: 100%; max-width: 600px; padding: 15px; box-sizing: border-box; flex-direction: column; align-items: center; }
+  .screen.active { display: flex; }
+  .auth-box { background: var(--nav-bg); padding: 30px; border-radius: 12px; width: 100%; text-align: center; border: 1px solid #475569; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 50px; }
+  .auth-box h1 { color: var(--accent); margin-top: 0; font-size: 28px; }
+  .input-group { margin-bottom: 15px; text-align: left; }
+  .input-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #94a3b8; }
+  .input-group input { width: 100%; padding: 10px; border-radius: 6px; background: #0b0f19; border: 1px solid #475569; color: white; box-sizing: border-box; outline: none; font-size: 16px; }
+  .switch-auth { color: var(--accent); cursor: pointer; font-size: 14px; text-decoration: underline; margin-top: 15px; display: inline-block; }
+  .btn { width: 100%; padding: 12px; border: none; border-radius: 6px; background: #334155; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: black; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-danger { background: var(--danger); }
+  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: var(--nav-bg); display: flex; justify-content: space-around; align-items: center; border-top: 1px solid #334155; z-index: 2000; }
+  .nav-item { color: #94a3b8; text-align: center; cursor: pointer; flex: 1; padding: 10px 0; font-size: 14px; transition: 0.2s; }
+  .nav-item.active { color: var(--accent); font-weight: bold; background: rgba(234, 179, 8, 0.1); border-radius: 8px; }
+  .hud { width: calc(var(--size) * 8); display: flex; justify-content: space-between; align-items: center; margin: 8px 0; font-weight: 600; font-size: 14px; }
+  .timer { background: rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+  .timer.active { color: #eab308; box-shadow: 0 0 10px rgba(234, 179, 8, 0.4); }
+  .history-container { width: calc(var(--size) * 8); height: 45px; background: rgba(30,41,59,0.8); border-radius: 8px; display: flex; align-items: center; overflow-x: auto; padding: 0 10px; box-sizing: border-box; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); scroll-behavior: smooth; }
+  .history-container::-webkit-scrollbar { height: 4px; }
+  .history-container::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
+  .move-pair { display: flex; align-items: center; margin-right: 15px; font-family: monospace; font-size: 14px; }
+  .move-num { color: #64748b; margin-right: 6px; }
+  .move-link { color: #cbd5e1; cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: 0.2s; }
+  .move-link.active-history { background: #eab308; color: #000; font-weight: bold; }
+  .board-container { position: relative; margin: 10px 0 10px 20px; }
+  .coords-y { position: absolute; left: -20px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-around; font-size: 11px; color: #64748b; font-weight: bold; }
+  .coords-x { position: absolute; bottom: -20px; left: 0; right: 0; display: flex; justify-content: space-around; font-size: 11px; color: #64748b; font-weight: bold; }
+  #board { width: calc(var(--size) * 8); height: calc(var(--size) * 8); background: #1e293b; position: relative; border-radius: 6px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); overflow: hidden; }
+  .grid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); pointer-events: none; }
+  .cell-dark { background: var(--board-dark); } .cell-light { background: var(--board-light); }
+  .last-move { width: 100%; height: 100%; background: rgba(234, 179, 8, 0.35); pointer-events: none; }
+  .check-alert { width: 100%; height: 100%; background: radial-gradient(circle, rgba(239,68,68,0.9) 0%, rgba(239,68,68,0.4) 100%); box-shadow: inset 0 0 15px rgba(239,68,68,0.8); pointer-events: none; z-index: 5; }
+  .dot { width: 30%; height: 30%; background: rgba(0,0,0,0.4); border-radius: 50%; margin: auto; pointer-events: none;}
+  .capture { width: 85%; height: 85%; border: 6px solid rgba(0,0,0,0.3); border-radius: 50%; margin: auto; box-sizing: border-box; pointer-events: none;}
+  .pieces-layer { position: absolute; inset: 0; pointer-events: none; }
+  .piece { position: absolute; width: var(--size); height: var(--size); display: flex; justify-content: center; align-items: center; font-size: calc(var(--size) * 0.75); font-family: Arial, sans-serif; pointer-events: auto; cursor: grab; z-index: 10; }
+  .piece.dragging { z-index: 100; cursor: grabbing; transform: scale(1.15) !important; filter: drop-shadow(0 15px 15px rgba(0,0,0,0.6)); transition: none !important;}
+  .w-piece { color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.7); }
+  .b-piece { color: #020617; text-shadow: 0 2px 4px rgba(255,255,255,0.4); }
+  .controls { display: flex; gap: 10px; width: calc(var(--size) * 8); margin-top: 15px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 3000; }
+  .modal-content { background: #1e293b; padding: 25px; border-radius: 12px; width: 300px; text-align: center; border: 1px solid #475569; box-shadow: 0 20px 50px rgba(0,0,0,0.9); }
+  .modal-content h2 { margin-top: 0; color: #eab308; }
+  .setting-label { display: block; text-align: left; margin-bottom: 5px; color: #94a3b8; font-size: 14px; }
+  select, .modal-btn { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 6px; background: #0f172a; color: white; border: 1px solid #475569; font-size: 16px; outline: none; }
+  .promo-box { display: flex; justify-content: space-around; font-size: 40px; margin-top: 20px; }
+  .promo-piece { cursor: pointer; padding: 10px; border-radius: 8px; background: #334155; transition: 0.2s;}
+  .promo-piece:hover { background: #eab308; transform: scale(1.1); }
+  .elo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; width: 100%; margin-bottom: 20px;}
+  .elo-card { background: var(--nav-bg); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #334155; }
+  .elo-card h3 { margin: 0 0 5px 0; color: #94a3b8; font-size: 14px; }
+  .elo-card .rating { font-size: 24px; font-weight: bold; color: var(--accent); }
+  .leaderboard-header { display: flex; justify-content: space-between; width: 100%; align-items: center; margin-bottom: 20px; }
+  .user-card { background: var(--nav-bg); width: 100%; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border: 1px solid #334155; box-sizing: border-box;}
+  .user-info { display: flex; align-items: center; gap: 10px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
+  .status-dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+  .btn-sm { padding: 6px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; color: black; background: var(--accent); margin-left: 5px;}
+</style>
+</head>
+<body>
+
+<div id="auth-screen" class="screen active">
+  <div class="auth-box" id="login-box">
+    <h1>Вход</h1>
+    <div class="input-group"><label>Email</label><input type="email" id="login-email" placeholder="player@gmail.com"></div>
+    <div class="input-group"><label>Пароль</label><input type="password" id="login-password" placeholder="********"></div>
+    <button class="btn btn-primary" onclick="login()">Войти</button>
+    <p class="switch-auth" onclick="toggleAuth('register')">Создать аккаунт</p>
+  </div>
+  <div class="auth-box" id="register-box" style="display:none;">
+    <h1>Регистрация</h1>
+    <div class="input-group"><label>Никнейм</label><input type="text" id="reg-username" placeholder="Шахматист"></div>
+    <div class="input-group"><label>Email</label><input type="email" id="reg-email" placeholder="player@gmail.com"></div>
+    <div class="input-group"><label>Пароль</label><input type="password" id="reg-password" placeholder="********"></div>
+    <button class="btn btn-primary" onclick="register()">Зарегистрироваться</button>
+    <p class="switch-auth" onclick="toggleAuth('login')">Уже есть аккаунт? Войти</p>
+  </div>
+</div>
+
+<div id="main-app" style="display:none; width:100%; flex-direction:column; align-items:center;">
+  
+  <div id="tab-play" class="screen active">
+    <div id="start-game-ui" style="width:100%; text-align:center; margin-top:50px;">
+      <h2 style="color:var(--accent);">Начать партию</h2>
+      <button class="btn btn-primary" style="padding:15px; font-size:18px;" onclick="document.getElementById('setup-modal').style.display='flex'">Игра с Ботом</button>
+    </div>
+
+    <div id="game-ui" style="display:none; flex-direction:column; align-items:center; width:100%;">
+      <div class="history-container" id="history"></div>
+      <div class="hud"><div id="bot-status">🤖 Оппонент</div><div class="timer" id="timer-b">00:00</div></div>
+      <div class="board-container">
+        <div class="coords-y" id="coords-y"></div>
+        <div id="board"><div class="grid" id="cells"></div><div class="grid" id="highlights"></div><div class="pieces-layer" id="pieces"></div></div>
+        <div class="coords-x" id="coords-x"></div>
+      </div>
+      <div class="hud"><div id="player-status">👤 Игрок</div><div class="timer" id="timer-w">00:00</div></div>
+      <div class="controls">
+        <button class="btn btn-danger" onclick="playerResign()">Сдаться</button>
+        <button class="btn" onclick="offerDraw()">Ничья</button>
+        <button class="btn" onclick="exitGame()">Выйти</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-leaderboard" class="screen">
+    <div class="leaderboard-header">
+      <h2 style="margin:0;">Рейтинг (Онлайн)</h2>
+      <select id="lb-filter" style="width:120px; margin:0;" onchange="renderLeaderboard()">
+        <option value="1">1 мин</option><option value="3">3 мин</option><option value="5" selected>5 мин</option><option value="10">10 мин</option><option value="30">30 мин</option>
+      </select>
+    </div>
+    <div id="leaderboard-list" style="width: 100%;"></div>
+  </div>
+
+  <div id="tab-profile" class="screen">
+    <h1 id="prof-username" style="color:var(--accent); margin:0 0 5px 0;">Имя</h1>
+    <p id="prof-email" style="color:#94a3b8; margin:0 0 20px 0;">email</p>
+    <div class="elo-grid">
+      <div class="elo-card"><h3>1 мин</h3><div class="rating" id="elo-1">1000</div></div>
+      <div class="elo-card"><h3>3 мин</h3><div class="rating" id="elo-3">1000</div></div>
+      <div class="elo-card"><h3>5 мин</h3><div class="rating" id="elo-5">1000</div></div>
+      <div class="elo-card"><h3>10 мин</h3><div class="rating" id="elo-10">1000</div></div>
+      <div class="elo-card"><h3>30 мин</h3><div class="rating" id="elo-30">1000</div></div>
+    </div>
+    <button class="btn btn-danger" onclick="logout()">Выйти из аккаунта</button>
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-item active" onclick="switchTab('play', this)">⚔️ Играть</div>
+    <div class="nav-item" onclick="switchTab('leaderboard', this)">🏆 Лидеры</div>
+    <div class="nav-item" onclick="switchTab('profile', this)">👤 Профиль</div>
+  </div>
+</div>
+
+<div id="setup-modal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <h2>Офлайн Игра</h2>
+    <span class="setting-label">Цвет:</span>
+    <select id="color-select"><option value="w">Белые</option><option value="b">Черные</option><option value="random">Случайный</option></select>
+    <span class="setting-label">Противник:</span>
+    <select id="elo-select">
+      <option value="150">Бот 150 (Новичок)</option><option value="800">Бот 800 (Любитель)</option>
+      <option value="1500" selected>Бот 1500 (КМС)</option><option value="2500">Бот 2500 (Мастер)</option><option value="3000">Бот 3000 (API)</option>
+    </select>
+    <span class="setting-label">Время:</span>
+    <select id="time-select">
+      <option value="60">1 мин</option><option value="180">3 мин</option><option value="300" selected>5 мин</option><option value="600">10 мин</option><option value="1800">30 мин</option>
+    </select>
+    <button class="btn btn-primary" onclick="startChessGame(false)">Начать</button>
+    <button class="btn" style="margin-top:10px;" onclick="document.getElementById('setup-modal').style.display='none'">Отмена</button>
+  </div>
+</div>
+
+<div id="challenge-modal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <h2 id="challenger-name" style="color:var(--accent);">Игрок</h2>
+    <p>Вызывает вас на дуэль!</p>
+    <button class="btn btn-primary" id="btn-accept-challenge">Принять</button>
+    <button class="btn btn-danger" style="margin-top:10px;" id="btn-decline-challenge">Отклонить</button>
+  </div>
+</div>
+
+<div id="promo-modal" class="modal" style="display:none;"><div class="modal-content"><h2 style="color:white;">Выберите фигуру</h2><div class="promo-box" id="promo-options"></div></div></div>
+<div id="info-modal" class="modal" style="display:none;"><div class="modal-content"><h2 id="info-title">Сообщение</h2><p id="info-text">Текст</p><button class="btn btn-primary" onclick="document.getElementById('info-modal').style.display='none'">ОК, Закрыть</button></div></div>
+
+<script>
+// ==========================================
+// 1. СЕРВЕР И SOCKET.IO (БЭКЕНД ИНТЕГРАЦИЯ)
+// ==========================================
+const socket = io('http://localhost:3000'); // Подключаемся к нашему Node.js серверу
+let onlineUsersList = [];
+let currentRoom = null;
+let isOnlineMatch = false;
+
+// Получаем обновленный список онлайна от сервера
+socket.on('update_leaderboard', (users) => {
+  onlineUsersList = users;
+  if (document.getElementById('tab-leaderboard').classList.contains('active')) {
+    renderLeaderboard();
+  }
+});
+
+// Нас вызывают на дуэль
+socket.on('receive_challenge', (data) => {
+  document.getElementById('challenger-name').textContent = data.challengerName;
+  document.getElementById('challenge-modal').style.display = 'flex';
+  
+  document.getElementById('btn-accept-challenge').onclick = () => {
+    socket.emit('accept_challenge', { challengerId: data.challengerId, timeMode: data.timeMode });
+    document.getElementById('challenge-modal').style.display = 'none';
+  };
+  document.getElementById('btn-decline-challenge').onclick = () => {
+    socket.emit('decline_challenge', data.challengerId);
+    document.getElementById('challenge-modal').style.display = 'none';
+  };
+});
+
+// Отказ от дуэли
+socket.on('challenge_declined', (name) => { showAlert("Отказ", `${name} отклонил ваш вызов.`); });
+
+// СЕРВЕР ДАЕТ СТАРТ ИГРЫ
+socket.on('game_start', (data) => {
+  document.getElementById('setup-modal').style.display = 'none';
+  isOnlineMatch = true;
+  currentRoom = data.roomId;
+  
+  // Настройка игры под полученные данные
+  playerColor = data.color;
+  timeW = timeB = parseInt(data.timeMode) * 60;
+  
+  startChessGame(true, data.opponent); // true = это онлайн игра
+  switchTab('play', document.querySelector('.nav-item')); // Перекидываем на доску
+});
+
+// Получение хода от сервера
+socket.on('receive_move', (data) => {
+  animateAndCommit(data.r1, data.c1, data.r2, data.c2, data.promo);
+});
+
+// Оппонент сдался или конец игры
+socket.on('game_over', (reason) => {
+  showGameOver("Игра окончена", reason);
+});
+
+// ==========================================
+// 2. АВТОРИЗАЦИЯ И ПРОФИЛЬ
+// ==========================================
+let currentUser = null;
+if(!localStorage.getItem('usersDB')) localStorage.setItem('usersDB', JSON.stringify({}));
+
+function showAlert(title, text) { document.getElementById('info-title').textContent = title; document.getElementById('info-text').textContent = text; document.getElementById('info-modal').style.display = 'flex'; }
+function toggleAuth(type) { document.getElementById('login-box').style.display = type === 'login' ? 'block' : 'none'; document.getElementById('register-box').style.display = type === 'register' ? 'block' : 'none'; }
+
+function register() {
+  const user = document.getElementById('reg-username').value.trim(), email = document.getElementById('reg-email').value.trim().toLowerCase(), pass = document.getElementById('reg-password').value;
+  if(!user || !email || !pass) return showAlert("Ошибка", "Заполните все поля!");
+  let db = JSON.parse(localStorage.getItem('usersDB'));
+  if(db[email]) return showAlert("Ошибка", "Email уже занят!");
+  db[email] = { username: user, password: pass, email, elo: { '1':1000, '3':1000, '5':1000, '10':1000, '30':1000 } };
+  localStorage.setItem('usersDB', JSON.stringify(db));
+  showAlert("Успех", "Аккаунт создан! Теперь войдите."); toggleAuth('login');
+}
+
+function login() {
+  const email = document.getElementById('login-email').value.trim().toLowerCase(), pass = document.getElementById('login-password').value;
+  let db = JSON.parse(localStorage.getItem('usersDB'));
+  if(db[email] && db[email].password === pass) {
+    currentUser = db[email]; 
+    document.getElementById('auth-screen').classList.remove('active'); document.getElementById('main-app').style.display = 'flex';
+    
+    // СООБЩАЕМ СЕРВЕРУ, ЧТО МЫ В СЕТИ
+    socket.emit('user_login', currentUser);
+    
+    updateProfileUI(); renderLeaderboard();
+  } else showAlert("Ошибка", "Неверный Email или пароль");
+}
+
+function logout() {
+  currentUser = null; document.getElementById('main-app').style.display = 'none'; document.getElementById('auth-screen').classList.add('active');
+  socket.disconnect(); // Отключаемся от сервера
+  setTimeout(() => socket.connect(), 1000); // Переподключаем пустой сокет для следующего логина
+  exitGame();
+}
+
+// ==========================================
+// 3. НАВИГАЦИЯ И ЛИДЕРЫ
+// ==========================================
+function switchTab(tabId, el) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + tabId).classList.add('active');
+  if(el) el.classList.add('active');
+  if(tabId === 'leaderboard') renderLeaderboard();
+  if(tabId === 'profile') updateProfileUI();
+}
+function updateProfileUI() {
+  if(!currentUser) return;
+  document.getElementById('prof-username').textContent = currentUser.username; document.getElementById('prof-email').textContent = currentUser.email;
+  ['1','3','5','10','30'].forEach(t => document.getElementById('elo-'+t).textContent = currentUser.elo[t]);
+}
+
+function renderLeaderboard() {
+  const t = document.getElementById('lb-filter').value; 
+  const list = document.getElementById('leaderboard-list'); list.innerHTML = '';
+  
+  // Берем данные прямо с сервера!
+  let all = [...onlineUsersList].sort((a,b)=>b.elo[t] - a.elo[t]);
+  
+  all.forEach((u, i) => {
+    let isMe = u.socketId === socket.id;
+    let actions = isMe ? '' : `<button class="btn-sm" onclick="sendChallenge('${u.socketId}', ${t})">Дуэль</button>`;
+    
+    list.innerHTML += `<div class="user-card"><div class="user-info"><span style="color:#64748b;width:20px;">#${i+1}</span><div class="status-dot online"></div><div><b>${u.username} ${isMe?"(Вы)":""}</b><div style="font-size:12px;color:var(--accent);">ELO: ${u.elo[t]}</div></div></div><div>${actions}</div></div>`;
+  });
+}
+
+function sendChallenge(targetId, timeMode) {
+  socket.emit('challenge_player', { targetId, timeMode });
+  showAlert("Ожидание", "Вызов отправлен. Ждем ответа...");
+}
+
+// ==========================================
+// 4. ШАХМАТНОЕ ЯДРО (ULTIMATE EDITION)
+// ==========================================
+const SYMBOLS = { r:'♜',n:'♞',b:'♝',q:'♛',k:'♚',p:'♟', R:'♜',N:'♞',B:'♝',Q:'♛',K:'♚',P:'♟' };
+let board = [], turn = 'w', gameActive = false;
+let castling = { K:true, Q:true, k:true, q:true }, epSq = null, halfMoves = 0, fullMoves = 1;
+let timeW = 300, timeB = 300, timerInt = null, aiElo = 1500, lastMove = null;
+let stateHistory = [], viewingHistoryIdx = -1;
+let selectedSq = null, legalMoves = [], draggingEl = null, dragOrigin = null, pendingPromo = null;
+
+const cellsEl = document.getElementById('cells'), piecesEl = document.getElementById('pieces'), highlightsEl = document.getElementById('highlights'), boardEl = document.getElementById('board');
+for(let r=0; r<8; r++) for(let c=0; c<8; c++) { let d=document.createElement('div'); d.className=(r+c)%2===0?'cell-light':'cell-dark'; cellsEl.appendChild(d); }
+
+function getVis(r, c) { return playerColor === 'w' ? {r, c} : {r: 7-r, c: 7-c}; }
+function getLog(vr, vc) { return playerColor === 'w' ? {r: vr, c: vc} : {r: 7-vr, c: 7-vc}; }
+
+function startChessGame(isOnline = false, opponentName = "Бот") {
+  document.getElementById('setup-modal').style.display = 'none'; document.getElementById('start-game-ui').style.display = 'none'; document.getElementById('game-ui').style.display = 'flex';
+  
+  isOnlineMatch = isOnline;
+
+  if(!isOnline) {
+    aiElo = parseInt(document.getElementById('elo-select').value);
+    timeW = timeB = parseInt(document.getElementById('time-select').value);
+    let col = document.getElementById('color-select').value; playerColor = col === 'random' ? (Math.random()<0.5?'w':'b') : col;
+    document.getElementById('bot-status').textContent = `🤖 Бот (${aiElo} ELO)`;
+  } else {
+    document.getElementById('bot-status').textContent = `🔴 ${opponentName}`;
+  }
+  
+  const cy = document.getElementById('coords-y'), cx = document.getElementById('coords-x');
+  if(playerColor === 'w') {
+    cy.innerHTML = '<span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>'; cx.innerHTML = '<span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>';
+    document.getElementById('player-status').textContent = `👤 ${currentUser.username} (Белые)`;
+  } else {
+    cy.innerHTML = '<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>'; cx.innerHTML = '<span>h</span><span>g</span><span>f</span><span>e</span><span>d</span><span>c</span><span>b</span><span>a</span>';
+    document.getElementById('player-status').textContent = `👤 ${currentUser.username} (Черные)`;
+  }
+
+  board = [['r','n','b','q','k','b','n','r'],['p','p','p','p','p','p','p','p'],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['P','P','P','P','P','P','P','P'],['R','N','B','Q','K','B','N','R']];
+  turn = 'w'; gameActive = true; castling = {K:true,Q:true,k:true,q:true}; epSq = null; halfMoves=0; fullMoves=1; lastMove=null; stateHistory=[]; viewingHistoryIdx=-1; selectedSq=null; draggingEl=null;
+  document.getElementById('history').innerHTML = '';
+  
+  saveState(); generateLegalMoves(); renderBoard(); startTimer();
+  if(playerColor === 'b' && !isOnlineMatch) setTimeout(makeBotMove, 500);
+}
+
+function exitGame() {
+  gameActive = false; clearInterval(timerInt);
+  document.getElementById('game-ui').style.display = 'none'; document.getElementById('start-game-ui').style.display = 'block';
+  if(isOnlineMatch) socket.emit('end_game', { roomId: currentRoom, reason: "Противник покинул игру" });
+  isOnlineMatch = false; currentRoom = null;
+}
+
+// ПЛАВНАЯ АНИМАЦИЯ ХОДА
+function animateAndCommit(r1, c1, r2, c2, promoPiece=null) {
+  let el = Array.from(piecesEl.children).find(e => e.dataset.r==r1 && e.dataset.c==c1);
+  if(el) {
+    let vis = getVis(r2, c2);
+    el.style.transition = 'transform 0.2s ease-out'; // Анимация только тут
+    el.style.transform = `translate(${vis.c*100}%, ${vis.r*100}%)`;
+    el.style.zIndex = 50;
+    setTimeout(() => { commitMove(r1, c1, r2, c2, promoPiece); }, 200); 
+  } else {
+    commitMove(r1, c1, r2, c2, promoPiece);
+  }
+}
+
+// ЛОГИКА ШАХМАТ И ВАЛИДАЦИЯ
+function isW(p) { return p && p === p.toUpperCase(); }
+function isB(p) { return p && p === p.toLowerCase(); }
+function getPseudoMoves(b, r, c, p) {
+  let moves = [], dir = isW(p)?-1:1, t = p.toLowerCase();
+  if(t === 'p') {
+    if(r+dir>=0&&r+dir<8 && !b[r+dir][c]) { moves.push({r:r+dir,c}); if((isW(p)&&r===6)||(!isW(p)&&r===1)) if(!b[r+2*dir][c]) moves.push({r:r+2*dir,c}); }
+    [-1,1].forEach(dc => { let nc=c+dc; if(nc>=0&&nc<8&&r+dir>=0&&r+dir<8) { if(b[r+dir][nc]&&isW(b[r+dir][nc])!==isW(p)) moves.push({r:r+dir,c:nc}); else if(epSq&&epSq.r===r+dir&&epSq.c===nc) moves.push({r:r+dir,c:nc}); }});
+  } else if(t === 'n') { [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(d=>{ let nr=r+d[0],nc=c+d[1]; if(nr>=0&&nr<8&&nc>=0&&nc<8&&(!b[nr][nc]||isW(b[nr][nc])!==isW(p))) moves.push({r:nr,c:nc}); });
+  } else if(['r','b','q'].includes(t)) { let dirs=[]; if(t==='r'||t==='q') dirs.push([-1,0],[1,0],[0,-1],[0,1]); if(t==='b'||t==='q') dirs.push([-1,-1],[-1,1],[1,-1],[1,1]);
+    dirs.forEach(d=>{ for(let i=1;i<8;i++){ let nr=r+d[0]*i,nc=c+d[1]*i; if(nr<0||nr>7||nc<0||nc>7) break; if(!b[nr][nc]) moves.push({r:nr,c:nc}); else { if(isW(b[nr][nc])!==isW(p)) moves.push({r:nr,c:nc}); break; } } });
+  } else if(t === 'k') { [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(d=>{ let nr=r+d[0],nc=c+d[1]; if(nr>=0&&nr<8&&nc>=0&&nc<8&&(!b[nr][nc]||isW(b[nr][nc])!==isW(p))) moves.push({r:nr,c:nc}); });
+    let row=isW(p)?7:0; if(r===row&&c===4&&b===board&&!isCheck(b,turn)) {
+      if(castling[isW(p)?'K':'k']&&!b[row][5]&&!b[row][6]&&!isSquareAttacked(b,row,5,isW(p)?'b':'w')&&!isSquareAttacked(b,row,6,isW(p)?'b':'w')) moves.push({r:row,c:6});
+      if(castling[isW(p)?'Q':'q']&&!b[row][3]&&!b[row][2]&&!b[row][1]&&!isSquareAttacked(b,row,3,isW(p)?'b':'w')&&!isSquareAttacked(b,row,2,isW(p)?'b':'w')) moves.push({r:row,c:2});
+    }
+  } return moves;
+}
+function isSquareAttacked(b, tr, tc, color) {
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++) { let p=b[r][c]; if(p&&((color==='w'&&isW(p))||(color==='b'&&isB(p)))) {
+      if(p.toLowerCase()==='k'){ if(Math.abs(r-tr)<=1&&Math.abs(c-tc)<=1) return true; continue; }
+      if(getPseudoMoves(b,r,c,p).some(m=>m.r===tr&&m.c===tc)) return true;
+    }
+  } return false;
+}
+function isCheck(b, pt) {
+  let kr=-1,kc=-1; for(let r=0;r<8;r++) for(let c=0;c<8;c++) { let p=b[r][c]; if(p&&p.toLowerCase()==='k'&&((pt==='w'&&isW(p))||(pt==='b'&&isB(p)))){ kr=r;kc=c; break;} }
+  if(kr===-1) return true; return isSquareAttacked(b,kr,kc,pt==='w'?'b':'w');
+}
+function isInsufficientMaterial(b) {
+  let p=[]; for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(b[r][c]) p.push(b[r][c].toLowerCase());
+  if(p.length===2) return true; if(p.length===3 && (p.includes('b')||p.includes('n'))) return true; return false;
+}
+function generateLegalMoves() {
+  legalMoves = [];
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++) {
+    let p=board[r][c]; if(!p||(turn==='w'&&!isW(p))||(turn==='b'&&!isB(p))) continue;
+    getPseudoMoves(board,r,c,p).forEach(m=>{ let sim = board.map(row=>[...row]); sim[m.r][m.c]=sim[r][c]; sim[r][c]=''; if(!isCheck(sim,turn)) legalMoves.push({from:{r,c},to:{r:m.r,c:m.c}}); });
+  }
+}
+
+// ИСТОРИЯ И ТАЙМЕРЫ
+function saveState(str=null) { stateHistory.push({board:board.map(r=>[...r]),turn,str,lm:lastMove?{from:{...lastMove.from},to:{...lastMove.to}}:null}); viewingHistoryIdx=stateHistory.length-1; }
+function renderHistoryUI() {
+  let h=document.getElementById('history'), html='', p='';
+  for(let i=1;i<stateHistory.length;i++) {
+    let l = `<span class="move-link ${i===viewingHistoryIdx?'active-history':''}" onclick="viewPast(${i})">${stateHistory[i].str}</span>`;
+    if(stateHistory[i].turn==='b') p = `<div class="move-pair"><span class="move-num">${Math.ceil(i/2)}.</span>${l}`; else { html += p+l+`</div>`; p=''; }
+  }
+  h.innerHTML = html+(p!==''?p+'</div>':''); h.scrollLeft = h.scrollWidth;
+}
+function viewPast(idx) { viewingHistoryIdx=idx; renderHistoryUI(); renderBoard(stateHistory[idx].board); }
+
+function startTimer() {
+  clearInterval(timerInt); updateTimerUI();
+  timerInt = setInterval(()=>{
+    if(!gameActive || viewingHistoryIdx!==stateHistory.length-1) return;
+    if(turn==='w') { timeW--; if(timeW<=0) showGameOver("Время вышло!", "Черные победили"); }
+    else { timeB--; if(timeB<=0) showGameOver("Время вышло!", "Белые победили"); }
+    updateTimerUI();
+  },1000);
+}
+function updateTimerUI() {
+  const f = s => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+  document.getElementById('timer-w').textContent = f(playerColor==='w'?timeW:timeB); document.getElementById('timer-b').textContent = f(playerColor==='w'?timeB:timeW);
+  document.getElementById('timer-w').className = 'timer '+(turn===playerColor?'active':''); document.getElementById('timer-b').className = 'timer '+(turn!==playerColor?'active':'');
+}
+
+// ХОД И ПРЕВРАЩЕНИЕ
+function attemptMove(r1, c1, r2, c2) {
+  let p = board[r1][c1];
+  if(p.toLowerCase() === 'p' && (r2 === 0 || r2 === 7)) {
+    pendingPromo = {r1,c1,r2,c2}; let cl = isW(p)?'w-piece':'b-piece';
+    document.getElementById('promo-options').innerHTML = `<div class="promo-piece ${cl}" onclick="finishPromo('Q')">♛</div><div class="promo-piece ${cl}" onclick="finishPromo('R')">♜</div><div class="promo-piece ${cl}" onclick="finishPromo('B')">♝</div><div class="promo-piece ${cl}" onclick="finishPromo('N')">♞</div>`;
+    document.getElementById('promo-modal').style.display='flex'; return;
+  }
+  
+  // Если мы ходим сами (а не принимаем ход сервера) - шлем на сервер
+  if(isOnlineMatch && turn === playerColor) {
+    socket.emit('make_move', { roomId: currentRoom, r1, c1, r2, c2, promo: null });
+  }
+  animateAndCommit(r1, c1, r2, c2);
+}
+function finishPromo(pc) { 
+  document.getElementById('promo-modal').style.display='none'; 
+  if(isOnlineMatch && turn === playerColor) {
+    socket.emit('make_move', { roomId: currentRoom, r1: pendingPromo.r1, c1: pendingPromo.c1, r2: pendingPromo.r2, c2: pendingPromo.c2, promo: pc });
+  }
+  animateAndCommit(pendingPromo.r1, pendingPromo.c1, pendingPromo.r2, pendingPromo.c2, pc); pendingPromo=null; 
+}
+
+function commitMove(r1, c1, r2, c2, promo=null) {
+  let p=board[r1][c1], target=board[r2][c2], isCap=target!=='', isCast=false;
+  if(p.toLowerCase()==='p'&&c1!==c2&&!target) { board[r1][c2]=''; isCap=true; }
+  epSq = (p.toLowerCase()==='p'&&Math.abs(r2-r1)===2)?{r:(r1+r2)/2,c:c1}:null;
+  if(p.toLowerCase()==='k'&&Math.abs(c2-c1)>1) { isCast=true; if(c2===6){board[r2][5]=board[r2][7];board[r2][7]='';} if(c2===2){board[r2][3]=board[r2][0];board[r2][0]='';} }
+  if(p==='K'){castling.K=castling.Q=false;} if(p==='k'){castling.k=castling.q=false;}
+  if(p==='R'&&c1===0)castling.Q=false; if(p==='R'&&c1===7)castling.K=false; if(p==='r'&&c1===0)castling.q=false; if(p==='r'&&c1===7)castling.k=false;
+  
+  board[r2][c2]=p; board[r1][c1]='';
+  if(promo) board[r2][c2]=isW(p)?promo.toUpperCase():promo.toLowerCase();
+  else if(p==='p'&&r2===7) board[r2][c2]='q'; else if(p==='P'&&r2===0) board[r2][c2]='Q';
+  lastMove = {from:{r:r1,c:c1},to:{r:r2,c:c2}};
+
+  let pL = p.toLowerCase()==='p'?'':p.toUpperCase(), dest = String.fromCharCode(97+c2)+(8-r2);
+  let str = isCast?(c2===6?"O-O":"O-O-O"):(pL+(isCap?(pL===''?String.fromCharCode(97+c1)+'x':'x'):'')+dest);
+  if(promo) str += '='+promo.toUpperCase();
+  
+  if(p.toLowerCase()==='p'||isCap) halfMoves=0; else halfMoves++;
+  if(turn==='b') fullMoves++; turn = turn==='w'?'b':'w';
+  if(isCheck(board,turn)) str += '+'; 
+  
+  saveState(str); renderHistoryUI(); selectedSq=null; generateLegalMoves(); renderBoard();
+
+  if(legalMoves.length===0) {
+    if(isCheck(board,turn)) { let w = turn==='w'?"Черные победили":"Белые победили"; showGameOver("Мат!", w); } 
+    else { showGameOver("Пат", "Ничья"); } return;
+  }
+  if(halfMoves>=100) return showGameOver("Ничья", "Правило 50 ходов");
+  if(isInsufficientMaterial(board)) return showGameOver("Ничья", "Недостаточно фигур");
+  
+  if(!isOnlineMatch && turn!==playerColor) setTimeout(makeBotMove, 100);
+}
+
+// ОТРИСОВКА И УПРАВЛЕНИЕ (Drag & Click)
+function renderBoard(b = board) {
+  piecesEl.innerHTML=''; highlightsEl.innerHTML='';
+  let isVH = viewingHistoryIdx !== stateHistory.length-1;
+  let cT = isVH ? stateHistory[viewingHistoryIdx].turn : turn;
+  let cLM = isVH ? stateHistory[viewingHistoryIdx].lm : lastMove;
+
+  // 1. Последний ход
+  if(cLM) {
+    let vf=getVis(cLM.from.r,cLM.from.c), vt=getVis(cLM.to.r,cLM.to.c);
+    let d1=document.createElement('div'); d1.className='last-move'; d1.style.gridColumn=vf.c+1; d1.style.gridRow=vf.r+1;
+    let d2=document.createElement('div'); d2.className='last-move'; d2.style.gridColumn=vt.c+1; d2.style.gridRow=vt.r+1; highlightsEl.append(d1, d2);
+  }
+  // 2. Шах
+  if(isCheck(b, cT)) {
+    let kr=-1,kc=-1; for(let r=0;r<8;r++) for(let c=0;c<8;c++) { let p=b[r][c]; if(p&&p.toLowerCase()==='k'&&((cT==='w'&&isW(p))||(cT==='b'&&isB(p)))) {kr=r;kc=c;break;} }
+    if(kr!==-1) { let v=getVis(kr,kc); let a=document.createElement('div'); a.className='check-alert'; a.style.gridColumn=v.c+1; a.style.gridRow=v.r+1; highlightsEl.appendChild(a); }
+  }
+  // 3. Подсветка доступных ходов
+  if(selectedSq && !isVH) {
+    legalMoves.filter(m=>m.from.r===selectedSq.r&&m.from.c===selectedSq.c).forEach(m=>{
+      let v=getVis(m.to.r,m.to.c), d=document.createElement('div'); d.style.gridColumn=v.c+1; d.style.gridRow=v.r+1; d.style.display='flex'; d.innerHTML=`<div class="${b[m.to.r][m.to.c]?'capture':'dot'}"></div>`; highlightsEl.appendChild(d);
+    });
+  }
+  // 4. Фигуры (Без transition, они ставятся мгновенно при рендере)
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++) {
+    if(b[r][c]) {
+      let v=getVis(r,c), el=document.createElement('div'); el.className=`piece ${isW(b[r][c])?'w-piece':'b-piece'}`; el.textContent=SYMBOLS[b[r][c]]; el.dataset.r=r; el.dataset.c=c; el.style.transform=`translate(${v.c*100}%, ${v.r*100}%)`; piecesEl.appendChild(el);
+    }
+  }
+}
+
+boardEl.addEventListener('pointerdown', e=>{
+  if(!gameActive||turn!==playerColor||pendingPromo) return;
+  if(viewingHistoryIdx!==stateHistory.length-1) { viewingHistoryIdx=stateHistory.length-1; renderHistoryUI(); renderBoard(); return; }
+  const rct=boardEl.getBoundingClientRect(); let vc=Math.floor((e.clientX-rct.left)/(rct.width/8)), vr=Math.floor((e.clientY-rct.top)/(rct.height/8)); if(vr<0||vr>7||vc<0||vc>7) return;
+  let {r,c} = getLog(vr,vc);
+  
+  if(selectedSq && legalMoves.some(m=>m.from.r===selectedSq.r&&m.from.c===selectedSq.c&&m.to.r===r&&m.to.c===c)) { attemptMove(selectedSq.r, selectedSq.c, r, c); return; }
+  if(board[r][c]&&((playerColor==='w'&&isW(board[r][c]))||(playerColor==='b'&&isB(board[r][c])))) {
+    selectedSq={r,c}; renderBoard();
+    draggingEl = Array.from(piecesEl.children).find(el=>el.dataset.r==r&&el.dataset.c==c);
+    if(draggingEl) { dragOrigin={r,c}; draggingEl.classList.add('dragging'); posDrag(e); }
+  } else { selectedSq=null; renderBoard(); }
+});
+function posDrag(e) { if(!draggingEl) return; const rct=boardEl.getBoundingClientRect(); draggingEl.style.transform=`translate(${e.clientX-rct.left-(rct.width/16)}px, ${e.clientY-rct.top-(rct.height/16)}px)`; }
+document.addEventListener('pointermove', e=>{if(draggingEl) posDrag(e);});
+document.addEventListener('pointerup', e=>{
+  if(!draggingEl) return; draggingEl.classList.remove('dragging');
+  const rct=boardEl.getBoundingClientRect(); let t=getLog(Math.floor((e.clientY-rct.top)/(rct.height/8)), Math.floor((e.clientX-rct.left)/(rct.width/8)));
+  if(t.r>=0&&t.r<8&&t.c>=0&&t.c<8 && (t.r!==dragOrigin.r||t.c!==dragOrigin.c) && legalMoves.some(m=>m.from.r===dragOrigin.r&&m.from.c===dragOrigin.c&&m.to.r===t.r&&m.to.c===t.c)) {
+    attemptMove(dragOrigin.r, dragOrigin.c, t.r, t.c); draggingEl=null; return; 
+  }
+  let v=getVis(dragOrigin.r,dragOrigin.c); draggingEl.style.transform=`translate(${v.c*100}%, ${v.r*100}%)`; draggingEl=null;
+});
+boardEl.addEventListener('dragstart', e=>e.preventDefault());
+
+// БОТ ОФФЛАЙН
+function getFEN() { let f=''; for(let r=0;r<8;r++){let e=0;for(let c=0;c<8;c++){if(board[r][c]){if(e>0){f+=e;e=0;}f+=board[r][c];}else e++;}if(e>0)f+=e;if(r<7)f+='/';} return `${f} ${turn} ${castling.K?'K':''}${castling.Q?'Q':''}${castling.k?'k':''}${castling.q?'q':''} ${epSq?String.fromCharCode(97+epSq.c)+(8-epSq.r):'-'} ${halfMoves} ${fullMoves}`; }
+async function makeBotMove() {
+  if(!gameActive) return; let st=document.getElementById('bot-status'); st.textContent=`🤖 Бот (Думает...)`;
+  let fb = () => { st.textContent=`🤖 Бот (${aiElo})`; if(legalMoves.length>0) { let m=legalMoves[Math.floor(Math.random()*legalMoves.length)]; animateAndCommit(m.from.r,m.from.c,m.to.r,m.to.c); }};
+  if(aiElo<=800) return setTimeout(fb,500);
+  try {
+    const r=await fetch("https://chess-api.com/v1",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fen:getFEN(),depth:aiElo>=2500?12:5})}); const d=await r.json();
+    if(d.from&&d.to) { st.textContent=`🤖 Бот (${aiElo})`; let c1=d.from.charCodeAt(0)-97, r1=8-parseInt(d.from[1]), c2=d.to.charCodeAt(0)-97, r2=8-parseInt(d.to[1]);
+      if(legalMoves.some(m=>m.from.r===r1&&m.from.c===c1&&m.to.r===r2&&m.to.c===c2)) animateAndCommit(r1,c1,r2,c2); else fb();
+    } else fb();
+  } catch(e) { fb(); }
+}
+
+function showGameOver(title, text) { 
+  gameActive=false; clearInterval(timerInt); showAlert(title, text); 
+  if(isOnlineMatch) socket.emit('end_game', { roomId: currentRoom, reason: title });
+}
+function playerResign() { if(gameActive) showGameOver("Вы сдались", playerColor==='w'?"Победа черных":"Победа белых"); }
+function offerDraw() { 
+  if(!gameActive) return; 
+  if(isOnlineMatch) showAlert("В разработке", "Предложение ничьей реальному игроку будет добавлено.");
+  else if(Math.random()>0.5) showGameOver("Ничья", "Противник принял предложение"); else showAlert("Отказ", "Противник отклонил ничью."); 
+}
+</script>
+</body>
+</html>
